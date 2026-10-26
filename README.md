@@ -20,11 +20,33 @@ npm ci
 npm run dev
 ```
 
-Open http://localhost:5101 and add a public server or feed. No API keys or environment variables are required.
+Open http://localhost:5101 and add a public server or feed. Public feeds work without API keys. Optional account connections require workspace protection as described below.
 
 The Express server listens on `0.0.0.0:5101`; Vite middleware serves React and the same origin serves `/api`. The health endpoint is `/api/health`. Port 5101 must be available.
 
-SQLite is stored in `data/fediscope.db` (ignored by git). This initial deployment is a single shared personal workspace; sources, bookmarks, loaded posts and filter preferences are shared by visitors. There are no accounts or native social interactions.
+SQLite is stored in `data/fediscope.db` (ignored by git). This is a single shared personal workspace; sources, bookmarks, loaded posts and filter preferences are shared by everyone with access. Set a workspace access key before connecting instance accounts. There are no separate FediScope user accounts or native social interactions.
+
+## Connect instance accounts
+
+You can add multiple instances and multiple labeled accounts on the same instance (up to 24 sources total). Each source has its own token and feed selection. Account connections expand what the instance allows your account to read; they do not provide global coverage or bypass instance permissions.
+
+1. Copy `.env.example` to `.env` and replace its placeholder with a random access key of at least 32 characters. For example, generate one with `openssl rand -hex 32`. The server loads `.env` at startup; environment variables already set by your host take precedence.
+2. Restart `npm run dev`, then unlock the workspace in your browser with that key.
+3. Choose **Add source**, select the platform and HTTPS instance URL, enter an account label and access token, and choose a feed.
+4. In **Sources**, use **Account** to replace a token or disconnect it. To disconnect, clear the token, select the public feed, and save. Changing credentials clears cached posts and bookmarks belonging only to that source. Removing an authenticated source also clears its exclusive cached content. Revoke unwanted tokens on the original instance as well.
+
+Supported account feeds:
+
+- **Mastodon:** local public timeline or home timeline. Create a user access token in your instance's developer/application settings with `read:statuses` permission. A token can also enable a public timeline that rejects anonymous requests. See [Mastodon authorization](https://docs.joinmastodon.org/client/authorized/) and [timeline documentation](https://docs.joinmastodon.org/methods/timelines/).
+- **Pixelfed:** the same token-based public/home endpoints, when exposed by that instance. Compatibility and permissions vary; unsupported endpoints report an error.
+- **Lemmy 0.19 / API v3:** local public posts or subscribed communities using the instance's session JWT as a Bearer token. Supply an existing token obtained from your own instance/session; FediScope does not collect usernames, passwords, or two-factor codes, and does not renew tokens. Older Lemmy releases and API-v4-only instances are not supported by this adapter. See the [Lemmy API documentation](https://join-lemmy.org/docs/contributors/04-api.html).
+- **PeerTube and RSS/Atom:** public access only in this version.
+
+Tokens are stored encrypted using AES-256-GCM in the local SQLite database. The encryption key is `data/credentials.key`; protect and back up the entire data directory together. Encryption does not protect against someone who can read both the database and key. Tokens never appear in source API responses or request URLs. Authenticated upstream responses bypass the shared fetch cache, and credentials cannot be forwarded to another origin by redirects. Use HTTPS for a hosted reader: both the workspace key and instance tokens are sent to your FediScope server.
+
+The browser keeps the workspace key in memory only, so reloading requires unlocking again. All people with this key can view the same account feeds and manage connections. `FEDISCOPE_ACCESS_KEY` must remain configured while accounts exist; the server refuses to start without it. To change the workspace key, update your server configuration and restart. Cached feed content itself is not encrypted. `.env`, databases, and credential keys are ignored by Git and blocked from Vite file serving.
+
+Optional host configuration: `PORT` overrides port 5101; `FEDISCOPE_DATA_DIR` overrides `data/`. Place a custom data directory outside the repository to keep it out of source control and web file serving.
 
 ## Development and validation
 
@@ -34,7 +56,7 @@ npm test        # Adapter and URL safety tests
 npm run build  # Build the frontend into dist/
 ```
 
-The current server runs through `npm run dev` and uses Vite middleware. The build command produces frontend assets only; serving `dist/` alone does not provide the API or SQLite backend. GitHub Pages cannot host the full app. Use a Node.js host with writable persistent storage for `data/`. This version has no authentication, so restrict access to the running app if your sources or bookmarks should remain private.
+The current server runs through `npm run dev` and uses Vite middleware. The build command produces frontend assets only; serving `dist/` alone does not provide the API or SQLite backend. GitHub Pages cannot host the full app. Use a Node.js host with writable persistent storage for `data/`. Configure a workspace access key to protect the API and use HTTPS when accessing a hosted instance. The access key protects the entire shared workspace, rather than providing separate users.
 
 The native SQLite dependency may require a C/C++ build toolchain and Python if a prebuilt binary is unavailable for your system.
 
@@ -61,9 +83,9 @@ Commercial use is allowed. Private use without distribution or remote network in
 
 ## Adapters and policies
 
-- Mastodon-compatible and Pixelfed: `/api/v1/timelines/public?local=true&limit=20`, `max_id` pagination. Pixelfed explicitly reports unavailable compatible capability. Restricted timelines need authentication, which is outside this version.
+- Mastodon-compatible and Pixelfed: `/api/v1/timelines/public?local=true&limit=20`, `max_id` pagination. Pixelfed explicitly reports unavailable compatible capability. Restricted timelines can use per-source user access tokens; home feeds use `/api/v1/timelines/home`.
 - PeerTube: `/api/v1/videos`, chronological publication order, offset pagination. Videos open on their original service, with no embedded player or autoplay.
-- Lemmy: stable v3 `/api/v3/post/list`, `New`, `Local`, `next_page` cursor. Servers that remove v3 report an error.
+- Lemmy: stable v3 `/api/v3/post/list`, `New`, `Local` or authenticated `Subscribed`, `next_page` cursor. Servers that remove v3 report an error.
 - RSS/Atom: direct feed URL, bounded publisher-provided entries; no invented pagination.
 
 Normalized objects retain author, server, canonical URL, published date, warnings, image descriptions, and adapter/remote-ID metadata. Canonical URLs deduplicate across subscriptions. HTML is allowlist-sanitized, sensitive content is collapsed, and outbound links allow HTTP(S). Source subscriptions can be paused or removed; bookmarked posts survive source removal. Search covers loaded content only. At most 2,000 chronological posts are cached.

@@ -5,3 +5,15 @@ test('Mastodon normalizes warnings, author, media, canonical URLs and metadata',
 test('canonical merge deduplicates cross-source content and retains provenance',()=>{const [a]=normalize('Mastodon',[{url:'https://example.org/a/',created_at:'2025-01-01'}],s);const b={...a,sourceIds:['two']};const newer={...a,id:'https://example.org/b',published:'2026-01-01T00:00:00.000Z'};const result=merge([a,b,newer]);assert.equal(result.length,2);assert.equal(result[0].id,newer.id);assert.deepEqual(result[1].sourceIds,['one','two']);});
 test('pagination follows each adapter protocol and refresh resets cursor',()=>{assert.equal(new URL(endpoint(s,true)).searchParams.get('max_id'),'42');assert.equal(new URL(endpoint(s,false)).searchParams.has('max_id'),false);assert.equal(new URL(endpoint({...s,platform:'PeerTube'},true)).searchParams.get('start'),'42');assert.equal(new URL(endpoint({...s,platform:'Lemmy'},true)).searchParams.get('page_cursor'),'42');assert.equal(endpoint({...s,platform:'RSS / Atom',url:'https://example.org/feed.xml'},true),'https://example.org/feed.xml');});
 test('heterogeneous adapters retain their distinct content types',()=>{assert.equal(normalize('PeerTube',[{uuid:'a',name:'Film',account:{displayName:'Jo'},publishedAt:'2025-01-01'}],{...s,platform:'PeerTube'})[0].type,'Videos');assert.equal(normalize('Lemmy',[{post:{ap_id:'https://lemmy.example/post/1',name:'Question',published:'2025-01-01'},creator:{name:'sam'}}],s)[0].type,'Discussions');assert.equal(normalize('RSS / Atom',[{title:'Article',link:{'@_href':'https://blog.example/post'},author:{name:'Lee'},updated:'2025-01-01'}],s)[0].author,'Lee');assert.doesNotMatch(clean('<img src=x onerror=alert(1)><iframe src="https://evil.org"></iframe>'),/img|iframe|onerror/);});
+
+test('RSS entries without article links are omitted rather than merged at the feed URL',()=>{
+ const feed={...s,platform:'RSS / Atom',url:'https://blog.example/feed.xml'};
+ const items=normalize('RSS / Atom',[
+  {title:'No link'},
+  {title:'Empty link',link:''},
+  {title:'Missing Atom href',link:{'@_rel':'alternate'}},
+  {title:'Relative article',link:'/posts/one'},
+  {title:'Absolute article',link:{'@_href':'https://blog.example/posts/two'}}
+ ],feed);
+ assert.deepEqual(items.map(item=>item.url),['https://blog.example/posts/one','https://blog.example/posts/two']);
+});
